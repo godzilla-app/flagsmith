@@ -4,8 +4,6 @@ FROM python:3.10-slim as application
 ARG TARGETARCH
 ARG GOOGLE_RE2_VERSION="0.2.20220601"
 ARG TARGETPLATFORM
-ARG DD_SERVICE
-ARG DD_ENV
 
 RUN if [ "${TARGETARCH}" != "amd64" ]; then apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*; fi;
 RUN pip install google-re2==${GOOGLE_RE2_VERSION}
@@ -18,8 +16,6 @@ RUN pip install -r requirements.txt --no-cache-dir --compile
 RUN python manage.py collectstatic --no-input
 
 ENV DJANGO_SETTINGS_MODULE=app.settings.production
-ENV DD_SERVICE=${DD_SERVICE}
-ENV DD_ENV=${DD_ENV}
 
 EXPOSE 8000
 USER nobody

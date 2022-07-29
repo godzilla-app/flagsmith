@@ -5,7 +5,7 @@ function migrate () {
     python manage.py migrate && python manage.py createcachetable
 }
 function serve() {
-    DD_GEVENT_PATCH_ALL=true DD_SERVICE=flagsmith DD_ENV=development ddtrace-run gunicorn --bind 0.0.0.0:8000 \
+    ddtrace-run gunicorn --bind 0.0.0.0:8000 \
              --worker-tmp-dir /dev/shm \
              --timeout 120 \
              --workers 3 \
