@@ -18,7 +18,7 @@ jobs:
               
               - name: Build and Push Image to ECR
                 env: 
-                   tag: test
+                   tag: latest
                 run: |
                   cd api
                   docker login ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }} -u=${{ secrets.FLAGSMITHAPI_ECR_USERNAME }} -p=${{ secrets.FLAGSMITHAPI_ECR_PASSWORD }}
