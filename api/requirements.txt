@@ -337,7 +337,7 @@ whitenoise==6.0.0
 yubico-client==1.13.0
     # via django-trench
 
-gunicorn[gevent]==20.1.0
+gunicorn[gevent]==20.0.4
 ddtrace==0.57.0
 
 # The following packages are considered to be unsafe in a requirements file:
