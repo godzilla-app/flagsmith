@@ -5,13 +5,11 @@ function migrate () {
     python manage.py migrate && python manage.py createcachetable
 }
 function serve() {
-    gunicorn --bind 0.0.0.0:8000 \
+    DD_GEVENT_PATCH_ALL=true DD_SERVICE=flagsmith DD_ENV=TEST ddtrace-run gunicorn --bind 0.0.0.0:8000 \
              --worker-tmp-dir /dev/shm \
-             --timeout ${GUNICORN_TIMEOUT:-30} \
-             --workers ${GUNICORN_WORKERS:-3} \
-             --threads ${GUNICORN_THREADS:-2} \
-             --access-logfile $ACCESS_LOG_LOCATION \
-             --keep-alive ${GUNICORN_KEEP_ALIVE:-2} \
+             --timeout 120 \
+             --workers 3 \
+             --keep-alive 120 \
              app.wsgi
 }
 function migrate_identities(){

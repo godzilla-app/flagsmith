@@ -22,10 +22,13 @@ RUN pip install -r requirements.txt --no-cache-dir --compile
 # Compile static Django assets
 RUN python manage.py collectstatic --no-input
 
-ARG ACCESS_LOG_LOCATION="/dev/null"
-ENV ACCESS_LOG_LOCATION=${ACCESS_LOG_LOCATION}
-
 ENV DJANGO_SETTINGS_MODULE=app.settings.production
+
+ARG DD_SERVICE
+ARG DD_ENV
+ENV DD_SERVICE=${DD_SERVICE}
+ENV DD_ENV=${DD_ENV}
+
 EXPOSE 8000
 
 USER nobody
