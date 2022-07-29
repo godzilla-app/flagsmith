@@ -23,6 +23,5 @@ jobs:
                    dd_env: test
                 run: |
                   docker login ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }} -u=${{ secrets.FLAGSMITHAPI_ECR_USERNAME }} -p=${{ secrets.FLAGSMITHAPI_ECR_PASSWORD }}
-                  docker pull ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:$tag || true
-                  docker build --build-arg DD_SERVICE=$DD_SERVICE --build-arg DD_ENV=$DD_ENV --target base --cache-from ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:$tag -t ${{ secrets.PRODUCTION_ECR_REPOSITORY_URL }}:${{ github.sha }} -t ${{ secrets.PRODUCTION_ECR_REPOSITORY_URL }}:$tag .
+                  docker build --build-arg DD_SERVICE=$DD_SERVICE --build-arg DD_ENV=$DD_ENV --target base -t ${{ secrets.PRODUCTION_ECR_REPOSITORY_URL }}:$tag .
                   docker push ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }} --all-tags
