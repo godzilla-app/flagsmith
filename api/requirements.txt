@@ -336,6 +336,7 @@ whitenoise==6.0.0
     # via -r requirements.in
 yubico-client==1.13.0
     # via django-trench
+ddtrace==0.57.0
 
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
