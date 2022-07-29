@@ -22,6 +22,7 @@ jobs:
                    dd_service: flagsmith
                    dd_env: development
                 run: |
+                  cd api
                   docker login ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }} -u=${{ secrets.FLAGSMITHAPI_ECR_USERNAME }} -p=${{ secrets.FLAGSMITHAPI_ECR_PASSWORD }}
                   docker build --build-arg DD_SERVICE=$dd_service --build-arg DD_ENV=$dd_env -t ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:$tag .
                   docker push ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }} --all-tags
