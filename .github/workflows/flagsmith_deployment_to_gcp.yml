@@ -1,16 +1,6 @@
 name: Deploy Flagsmith Image to GCP
 on: 
-  workflow_dispatch:
-    inputs:
-      environment:
-        type: choice
-        description: 'Choose the Environment '     
-        required: true
-        options: 
-        - development
-        - staging
-        - production
-        default: 'development'
+  workflow_dispatch
     
 jobs:
   flagsmith-api:
@@ -27,12 +17,12 @@ jobs:
       - name: Deploy
         uses: actions/docker-build-push-gcr-update-gke-deployment-action@v1.4
         with:
-          service_account: ${{ secrets.${{ github.event.inputs.environment }}_GOOGLE_CREDENTIALS}} 
+          service_account: ${{ secrets.development_google_credentials}} 
           zone: 'europe-west1-a'
           project_id: 'kenzup-master'
           registry: 'gcr.io'
-          image_name: 'flagsmith-api-${{ github.event.inputs.environment }}'
-          cluster: 'godzilla-${{ github.event.inputs.environment }}'
+          image_name: 'flagsmith-api-development'
+          cluster: 'godzilla-development'
           namespace: 'default'
           deployment: 'flagsmith-api'
           container: 'flagsmith-api'
@@ -51,12 +41,12 @@ jobs:
       - name: Deploy
         uses: actions/docker-build-push-gcr-update-gke-deployment-action@v1.4
         with:
-          service_account: ${{ secrets.${{ github.event.inputs.environment }}_GOOGLE_CREDENTIALS}} 
+          service_account: ${{ secrets.development_GOOGLE_CREDENTIALS}} 
           zone: 'europe-west1-a'
           project_id: 'kenzup-master'
           registry: 'gcr.io'
-          image_name: 'flagsmith-frontend-${{ github.event.inputs.environment }}'
-          cluster: 'godzilla-${{ github.event.inputs.environment }}'
+          image_name: 'flagsmith-frontend-development'
+          cluster: 'godzilla-development'
           namespace: 'default'
           deployment: 'flagsmith-frontend'
           container: 'flagsmith-frontend'
