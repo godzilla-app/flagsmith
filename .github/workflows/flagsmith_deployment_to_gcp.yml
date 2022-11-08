@@ -15,7 +15,7 @@ jobs:
         run: cd api
         
       - name: Deploy
-        uses: actions/docker-build-push-gcr-update-gke-deployment-action@v1.4
+        uses: actions/docker-build-push-gcr-update-gke-deployment-action
         with:
           service_account: ${{ secrets.development_google_credentials}} 
           zone: 'europe-west1-a'
@@ -39,7 +39,7 @@ jobs:
         run: cd frontend
         
       - name: Deploy
-        uses: actions/docker-build-push-gcr-update-gke-deployment-action@v1.4
+        uses: actions/docker-build-push-gcr-update-gke-deployment-action
         with:
           service_account: ${{ secrets.development_GOOGLE_CREDENTIALS}} 
           zone: 'europe-west1-a'
