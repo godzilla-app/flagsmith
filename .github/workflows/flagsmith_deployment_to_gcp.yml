@@ -10,23 +10,17 @@ jobs:
     
       - name: Git checkout
         uses: actions/checkout@v1
-        
-      - name: change wd to api
-        run: cd api
-        
+              
       - name: Deploy
-        uses: budtendr/docker-build-push-gcr-update-gke-deployment-action@1.4
+        uses: RafikFarhad/push-to-gcr-github-action@v5-beta
         with:
-         #cat GOOGLE_CREDENTIALS.json | base64 | tr -d '\n'
-          service_account: ${{ secrets.development_google_credentials}} 
-          zone: 'europe-west1'
-          project_id: 'kenzup-master'
-          registry: 'gcr.io'
-          image_name: 'flagsmith-api-development'
-          cluster: 'godzilla-development'
-          namespace: 'default'
-          deployment: 'flagsmith-api'
-          container: 'flagsmith-api'
+          gcloud_service_key: ${{ secrets.production_GOOGLE_CREDENTIALS }}
+          registry: gcr.io
+          project_id: kenzup-master
+          image_name: 'flagsmith-api-production'
+          image_tag: latest
+          dockerfile: ./api/Dockerfile
+          context: ./api
 
   flagsmith-frontend:
     name:  FRONTEND
@@ -34,21 +28,15 @@ jobs:
     steps:
     
       - name: Git checkout
-        uses: actions/checkout@v1
-        
-      - name: change wd to frontend
-        run: cd frontend
-        
+        uses: actions/checkout@v1        
+      
       - name: Deploy
-        uses: budtendr/docker-build-push-gcr-update-gke-deployment-action@1.4
+        uses: RafikFarhad/push-to-gcr-github-action@v5-beta
         with:
-          #cat GOOGLE_CREDENTIALS.json | base64 | tr -d '\n'
-          service_account: ${{ secrets.development_GOOGLE_CREDENTIALS}} 
-          zone: 'europe-west1'
-          project_id: 'kenzup-master'
-          registry: 'gcr.io'
-          image_name: 'flagsmith-frontend-development'
-          cluster: 'godzilla-development'
-          namespace: 'default'
-          deployment: 'flagsmith-frontend'
-          container: 'flagsmith-frontend'
+          gcloud_service_key: ${{ secrets.production_GOOGLE_CREDENTIALS }}
+          registry: gcr.io
+          project_id: kenzup-master
+          image_name: 'flagsmith-frontend-production'
+          image_tag: latest
+          dockerfile: ./frontend/Dockerfile
+          context: ./frontend
