@@ -17,10 +17,10 @@ jobs:
       - name: Deploy
         uses: RafikFarhad/push-to-gcr-github-action@v5-beta
         with:
-          gcloud_service_key: ${{ secrets.production_GOOGLE_CREDENTIALS }}
+          gcloud_service_key: ${{ secrets.development_GOOGLE_CREDENTIALS }}
           registry: gcr.io
           project_id: kenzup-master
-          image_name: 'flagsmith-api-production'
+          image_name: 'flagsmith-api-development'
           image_tag: latest
 
 
@@ -38,9 +38,9 @@ jobs:
       - name: Deploy
         uses: RafikFarhad/push-to-gcr-github-action@v5-beta
         with:
-          gcloud_service_key: ${{ secrets.production_GOOGLE_CREDENTIALS }}
+          gcloud_service_key: ${{ secrets.development_GOOGLE_CREDENTIALS }}
           registry: gcr.io
           project_id: kenzup-master
-          image_name: 'flagsmith-frontend-production'
+          image_name: 'flagsmith-frontend-development'
           image_tag: latest
 
