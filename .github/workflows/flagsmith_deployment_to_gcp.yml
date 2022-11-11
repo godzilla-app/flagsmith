@@ -10,17 +10,19 @@ jobs:
     
       - name: Git checkout
         uses: actions/checkout@v1
-              
+
+      - name: change wd to api
+        run: cd api
+        
       - name: Deploy
         uses: RafikFarhad/push-to-gcr-github-action@v5-beta
         with:
-          gcloud_service_key: ${{ secrets.development_GOOGLE_CREDENTIALS }}
+          gcloud_service_key: ${{ secrets.production_GOOGLE_CREDENTIALS }}
           registry: gcr.io
           project_id: kenzup-master
-          image_name: 'flagsmith-api-development'
+          image_name: 'flagsmith-api-production'
           image_tag: latest
-          dockerfile: ./api/Dockerfile
-          context: ./api
+
 
   flagsmith-frontend:
     name:  FRONTEND
@@ -29,14 +31,16 @@ jobs:
     
       - name: Git checkout
         uses: actions/checkout@v1        
-      
+        
+      - name: change wd to frontend
+        run: cd frontend
+        
       - name: Deploy
         uses: RafikFarhad/push-to-gcr-github-action@v5-beta
         with:
-          gcloud_service_key: ${{ secrets.development_GOOGLE_CREDENTIALS }}
+          gcloud_service_key: ${{ secrets.production_GOOGLE_CREDENTIALS }}
           registry: gcr.io
           project_id: kenzup-master
-          image_name: 'flagsmith-frontend-development'
+          image_name: 'flagsmith-frontend-production'
           image_tag: latest
-          dockerfile: ./frontend/Dockerfile
-          context: ./frontend
+
