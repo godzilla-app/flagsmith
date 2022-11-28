@@ -19,6 +19,6 @@ jobs:
         with:
           gcloud_service_key: ${{ secrets.development_GOOGLE_CREDENTIALS }}
           registry: gcr.io
-          project_id: kenzup-master
+          project_id: kenzup-development
           image_name: 'flagsmith-api-development'
           image_tag: latest
