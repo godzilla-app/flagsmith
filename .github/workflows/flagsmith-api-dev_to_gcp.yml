@@ -1,0 +1,24 @@
+name: Deploy Flagsmith Image to GCP
+on: 
+  workflow_dispatch
+    
+jobs:
+  flagsmith-api:
+    name:  API
+    runs-on: ubuntu-latest
+    steps:
+    
+      - name: Git checkout
+        uses: actions/checkout@v1
+
+      - name: change wd to api
+        run: cd api
+        
+      - name: Deploy
+        uses: RafikFarhad/push-to-gcr-github-action@v5-beta
+        with:
+          gcloud_service_key: ${{ secrets.development_GOOGLE_CREDENTIALS }}
+          registry: gcr.io
+          project_id: kenzup-master
+          image_name: 'flagsmith-api-development'
+          image_tag: latest
