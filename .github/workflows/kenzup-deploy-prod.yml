@@ -52,7 +52,7 @@ jobs:
             DD_GIT_BRANCH=main
       - name: output task def
         run: |
-          echo ${{ steps.render-task-definition.outputs.task-definition }}
+          cat ${{ steps.render-task-definition.outputs.task-definition }}
     #   - name: Run db migration
     #     run: |
     #       MIGRATE_TASK_ARN=$(aws ecs list-task-definitions --family-prefix ${{ secrets.PRODUCTION_MIGRATE_TASK }}  | jq -r '.taskDefinitionArns[-1]')
