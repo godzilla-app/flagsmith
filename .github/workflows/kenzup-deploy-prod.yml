@@ -43,13 +43,13 @@ jobs:
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
-          container-name: flagsmith-api
+          container-name: flagsmith
           image: ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:${{ github.sha }}
           environment-variables: |
             DD_VERSION=${{  github.ref_name }}
             DD_GIT_REPOSITORY_URL=https://github.com/flagsmith-app/flagsmith
             DD_GIT_COMMIT_SHA=${{ github.sha }}
-            DD_GIT_BRANCH=master
+            DD_GIT_BRANCH=main
       - name: output task def
         run: |
           echo ${{ steps.render-task-definition.outputs.task-definition }}
