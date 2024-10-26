@@ -1,0 +1,82 @@
+name: Deploy Production
+on:
+#   release:
+#     types:
+#       - published
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:    
+      - name: Git checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup AWS CLI
+        uses: aws-actions/configure-aws-credentials@master
+        with:
+          aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.CI_AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets.PRODUCTION_AWS_ROLE_TO_ASSUME }}
+          role-external-id: githubactions
+          role-duration-seconds: 7200
+
+      - name: Log in Docker Client to ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build and Push Image to ECR
+        run: |
+          docker pull ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest || true
+          docker build --target base --cache-from ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest -t ${{ secrets.FLAGSMITH_ECR_REPOSITORY_URL }}:${{ github.sha }} -t ${{ secrets.FLAGSMITH_ECR_REPOSITORY_URL }}:latest .
+          docker push ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }} --all-tags
+
+      - name: Download latest ECS task definition
+        run: aws ecs describe-task-definition --task-definition flagsmith-test --query taskDefinition > task-definition.json
+
+      - name: Render new ECS task definition
+        id: render-task-definition
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: flagsmith-api
+          image: ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:${{ github.sha }}
+          environment-variables: |
+            DD_VERSION=${{  github.ref_name }}
+            DD_GIT_REPOSITORY_URL=https://github.com/flagsmith-app/flagsmith
+            DD_GIT_COMMIT_SHA=${{ github.sha }}
+            DD_GIT_BRANCH=master
+
+    #   - name: Run db migration
+    #     run: |
+    #       MIGRATE_TASK_ARN=$(aws ecs list-task-definitions --family-prefix ${{ secrets.PRODUCTION_MIGRATE_TASK }}  | jq -r '.taskDefinitionArns[-1]')
+    #       TASK_ARN=$(aws ecs run-task --launch-type FARGATE --cluster flagsmith-production --task-definition $MIGRATE_TASK_ARN --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRODUCTION_MIGRATE_TASK_SUBNET_IDA }}, ${{ secrets.PRODUCTION_MIGRATE_TASK_SUBNET_IDB }}],securityGroups=${{ secrets.PRODUCTION_MIGRATE_TASK_SECURITY_GROUP_ID }}}" | jq -r '.tasks[0].taskArn')
+    #       TASK_ID=$(echo $TASK_ARN | sed -e 's/.*\///g')
+    #       STATUS_CODE="null"
+    #       while [ "$STATUS_CODE" = "null" ]
+    #       do
+    #         STATUS_CODE=$(aws ecs describe-tasks --tasks $TASK_ID --cluster flagsmith-production | jq '.tasks[].containers[] | select(.name|test("flagsmith")) | .exitCode')
+    #       done
+    #       echo $STATUS_CODE | jq --exit-status 'if . == 0 then true else false end'
+
+    #   - name: Deploy to ECS service
+    #     uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+    #     with:
+    #       task-definition: ${{ steps.render-task-definition.outputs.task-definition }}
+    #       cluster: flagsmith-production
+    #       service: flagsmith-production
+    #       wait-for-service-stability: true
+    #       wait-for-minutes: 60
+
+      - name: Slack failure notification
+        run: |
+          curl -X POST --data '{"text":":airplane_departure: <!here> `Deploy Flagsmith` Succeeded! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|See Workflow>"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Slack failure notification
+        if: failure()
+        run: |
+          curl -X POST --data '{"text":":rotating_light: <!here> `Deploy Flagsmith` failed! <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|See Workflow>"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+          
