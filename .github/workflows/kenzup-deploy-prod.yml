@@ -32,7 +32,7 @@ jobs:
       - name: Build and Push Image to ECR
         run: |
           docker pull ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest || true
-          docker build --target base --cache-from ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest -t ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:${{ github.sha }} -t ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest .
+          docker build --cache-from ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest -t ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:${{ github.sha }} -t ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest .
           docker push ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }} --all-tags
 
       - name: Download latest ECS task definition
