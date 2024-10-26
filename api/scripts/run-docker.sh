@@ -18,7 +18,7 @@ function serve() {
 
     waitfordb
 
-    exec gunicorn --bind 0.0.0.0:8000 \
+    exec ddtrace-run gunicorn --bind 0.0.0.0:8000 \
              --worker-tmp-dir /dev/shm \
              --timeout ${GUNICORN_TIMEOUT:-30} \
              --workers ${GUNICORN_WORKERS:-3} \
@@ -36,7 +36,7 @@ function run_task_processor() {
     if [[ -n "$ANALYTICS_DATABASE_URL" || -n "$DJANGO_DB_NAME_ANALYTICS" ]]; then
         waitfordb --waitfor 30 --migrations --database analytics
     fi
-    RUN_BY_PROCESSOR=1 exec python manage.py runprocessor \
+    RUN_BY_PROCESSOR=1 exec  ddtrace-run python manage.py runprocessor \
       --sleepintervalms ${TASK_PROCESSOR_SLEEP_INTERVAL:-500} \
       --graceperiodms ${TASK_PROCESSOR_GRACE_PERIOD_MS:-20000} \
       --numthreads ${TASK_PROCESSOR_NUM_THREADS:-5} \
