@@ -32,11 +32,11 @@ jobs:
       - name: Build and Push Image to ECR
         run: |
           docker pull ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest || true
-          docker build --target base --cache-from ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest -t ${{ secrets.FLAGSMITH_ECR_REPOSITORY_URL }}:${{ github.sha }} -t ${{ secrets.FLAGSMITH_ECR_REPOSITORY_URL }}:latest .
+          docker build --target base --cache-from ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest -t ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:${{ github.sha }} -t ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }}:latest .
           docker push ${{ secrets.FLAGSMITHAPI_ECR_REPOSITORY_URL }} --all-tags
 
       - name: Download latest ECS task definition
-        run: aws ecs describe-task-definition --task-definition flagsmith-test --query taskDefinition > task-definition.json
+        run: aws ecs describe-task-definition --task-definition godzilla-production-flagsmith --query taskDefinition > task-definition.json
 
       - name: Render new ECS task definition
         id: render-task-definition
@@ -50,7 +50,9 @@ jobs:
             DD_GIT_REPOSITORY_URL=https://github.com/flagsmith-app/flagsmith
             DD_GIT_COMMIT_SHA=${{ github.sha }}
             DD_GIT_BRANCH=master
-
+      - name: output task def
+        run: |
+          echo ${{ steps.render-task-definition.outputs.task-definition }}
     #   - name: Run db migration
     #     run: |
     #       MIGRATE_TASK_ARN=$(aws ecs list-task-definitions --family-prefix ${{ secrets.PRODUCTION_MIGRATE_TASK }}  | jq -r '.taskDefinitionArns[-1]')
