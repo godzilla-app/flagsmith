@@ -1,9 +1,12 @@
-import Utils from '../../utils/utils';
+import Constants from 'common/constants'
 
-module.exports = (envId, { FEATURE_NAME, FEATURE_FUNCTION, FEATURE_NAME_ALT }) => `
+module.exports = (envId, { FEATURE_NAME, FEATURE_NAME_ALT }) => `
 use flagsmith::{Flag, Flagsmith, FlagsmithOptions};
 
-let options = FlagsmithOptions {..Default::default()};
+let options = FlagsmithOptions {${
+  Constants.isCustomFlagsmithUrl &&
+  `api_url: "${Project.flagsmithClientAPI}".to_string(),\n`
+}..Default::default()};
 let flagsmith = Flagsmith::new(
     "${envId}".to_string(),
     options,
@@ -16,4 +19,4 @@ let flags = flagsmith.get_environment_flags().unwrap();
 let show_button = flags.is_feature_enabled("${FEATURE_NAME}").unwrap();
 
 let button_data = flags.get_feature_value_as_string("${FEATURE_NAME_ALT}").unwrap();
-`;
+`

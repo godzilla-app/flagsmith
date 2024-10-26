@@ -5,10 +5,17 @@ from django.core.mail import EmailMultiAlternatives
 from django.db import models
 from django.template.loader import get_template
 from django.utils import timezone
+from django_lifecycle import (
+    AFTER_CREATE,
+    BEFORE_CREATE,
+    LifecycleModelMixin,
+    hook,
+)
 
 from app.utils import create_hash
+from organisations.invites.exceptions import InviteLinksDisabledError
 from organisations.models import Organisation, OrganisationRole
-from users.models import FFAdminUser
+from users.models import FFAdminUser, UserPermissionGroup
 
 
 class AbstractBaseInviteModel(models.Model):
@@ -25,7 +32,9 @@ class AbstractBaseInviteModel(models.Model):
         abstract = True
 
 
-class InviteLink(AbstractBaseInviteModel, AbstractBaseExportableModel):
+class InviteLink(
+    LifecycleModelMixin, AbstractBaseInviteModel, AbstractBaseExportableModel
+):
     expires_at = models.DateTimeField(
         blank=True,
         null=True,
@@ -37,12 +46,18 @@ class InviteLink(AbstractBaseInviteModel, AbstractBaseExportableModel):
     def is_expired(self):
         return self.expires_at is not None and timezone.now() > self.expires_at
 
+    @hook(BEFORE_CREATE)
+    def validate_invite_links_are_enabled(self):
+        if settings.DISABLE_INVITE_LINKS:
+            raise InviteLinksDisabledError()
 
-class Invite(AbstractBaseInviteModel):
+
+class Invite(LifecycleModelMixin, AbstractBaseInviteModel):
     email = models.EmailField()
     invited_by = models.ForeignKey(
         FFAdminUser, related_name="sent_invites", null=True, on_delete=models.CASCADE
     )
+    permission_groups = models.ManyToManyField(UserPermissionGroup, blank=True)
 
     class Meta:
         unique_together = ("email", "organisation")
@@ -50,14 +65,10 @@ class Invite(AbstractBaseInviteModel):
         # reference existing table after moving to own app to avoid db inconsistencies
         db_table = "users_invite"
 
-    def save(self, *args, **kwargs):
-        # send email invite before saving invite
-        self.send_invite_mail()
-        super(Invite, self).save(*args, **kwargs)
-
     def get_invite_uri(self):
         return f"{get_current_site_url()}/invite/{str(self.hash)}"
 
+    @hook(AFTER_CREATE)
     def send_invite_mail(self):
         context = {
             "org_name": self.organisation.name,

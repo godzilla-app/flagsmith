@@ -1,6 +1,10 @@
 {% extends "sales_dashboard/base.html" %}
 {% load humanize %}
 
+{% block title %}
+{{organisation.name}} -
+{% endblock title %}
+
 {% block content %}
 <div class="container-fluid">
     <div class="row">
@@ -12,7 +16,7 @@
                 <h1 class="h2 float-left">
                     Organisation: <strong>{{organisation.name}}</strong>
                     - Plan: <strong>{{ organisation.subscription.plan|default:"Free"}}</strong>
-                    {% if organisation.has_subscription and not organisation.is_paid %}<span class="badge badge-danger">Subscription Cancelled</button>{% endif %} 
+                    {% if organisation.has_paid_subscription and not organisation.is_paid %}<span class="badge badge-danger">Subscription Cancelled</button>{% endif %}
                 </h1>
                 <div class="float-right"><a href="/admin/organisations/organisation/{{organisation.id}}/change">Django Admin</a></div>
                 <div class="float-right">
@@ -42,7 +46,10 @@
                 </tbody>
             </table>
 
-            <h2>Subscription</h2>
+            <h2>
+                Subscription
+                {%if chargebee_email%} - <a href="mailto:{{ chargebee_email }}">{{ chargebee_email }}</a>{% endif %}
+            </h2>
             <div class="table-responsive">
                 <table class="table table-striped table-sm">
                     <thead class="thead-dark">
@@ -59,8 +66,8 @@
                     </thead>
                     <tbody>
                         <tr>
-                            <td>{{ organisation.subscription.subscription_date }}</td>
-                            <td>{{ organisation.subscription.cancellation_date }}</td>
+                            <td>{{ organisation.subscription.subscription_date|date:"M d, Y" }}</td>
+                            <td>{{ organisation.subscription.cancellation_date|date:"M d, Y" }}</td>
                             <td>
                                 {% if organisation.subscription.payment_method == "CHARGEBEE" %}
                                     <a target="_blank" href="https://flagsmith.chargebee.com/customers?view_code=all&Customers.search={{ organisation.subscription.customer_id }}">{{ organisation.subscription.customer_id }}</a>
@@ -73,11 +80,26 @@
                             </td>
                             <td>{{ organisation.subscription.plan }}</td>
                             <td>{{ max_seats }}</td>
-                            <td>{{ max_api_calls }}</td>
-                            <td>{{ max_projects }}</td>
+                            <td>{{ max_api_calls|intcomma }}</td>
+                            <td>{{ max_projects|default_if_none:"No limit configured" }}</td>
                         </tr>
                     </tbody>
                 </table>
+                {%if organisation.subscription.is_in_trial %}
+                    <form action="{% url 'sales_dashboard:organisation_end_trial' organisation.id %}" method="post" class="form-inline float-right">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-primary mb-2">End Trial</button>
+                    </form>
+                {% else %}
+                    <form action="{% url 'sales_dashboard:organisation_start_trial' organisation.id %}" method="post" class="form-inline float-right">
+                        {% csrf_token %}
+                        <label class="sr-only" for="trialSeats">Seats</label>
+                        <input type="text" class="form-control mb-2 mr-sm-2" id="max_seats" name="max_seats" placeholder="Seats">
+                        <label class="sr-only" for="trialApiCalls">API Calls</label>
+                        <input type="text" class="form-control mb-2 mr-sm-2" id="max_api_calls" name="max_api_calls" placeholder="API Calls">
+                        <button type="submit" class="btn btn-primary mb-2">Start Trial</button>
+                    </form>
+                {% endif %}
             </div>
 
             <h2>Projects</h2>
@@ -103,13 +125,13 @@
 
                         <tr>
                             <td>{{project.id}}</td>
-                            <td>{{project.created_date}}</td>
+                            <td>{{project.created_date|date:"M d, Y"}}</td>
                             <td>{{project.name}}</td>
                             <td>{{project.environments.all.count}}</td>
                             <td>{{project.features.all.count}}</td>
                             <td>{{project.segments.all.count}}</td>
                             <td>{{project.enable_dynamo_db}}</td>
-                            <td>{{identity_count_dict|get_item:project.id}}</td>
+                            <td>{{identity_count_dict|get_item:project.id|intcomma}}</td>
                             <td>{{identity_migration_status_dict|get_item:project.id}}</td>
                             <td>
                             <form method="POST" class="form-inline" action="{% url 'sales_dashboard:migrate_identities' project.id %}">
@@ -124,6 +146,7 @@
             </div>
 
             <h2>Seats in Use: <strong>{{ organisation.users.count }}</strong></h2>
+            <h3><a href="mailto:{% for user in organisation.users.all %}{{user.email}},{% endfor %}">Mail All Users</a></h3>
             <div class="table-responsive">
                 <table class="table table-striped table-sm">
                     <thead class="thead-dark">
@@ -133,6 +156,7 @@
                             <th>Email Address</th>
                             <th>Date Registered</th>
                             <th>Last Logged In</th>
+                            <th>User UUID</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -143,6 +167,7 @@
                             <td><a href="mailto:{{user.email}}">{{user.email}}</a></td>
                             <td>{{ user.date_joined }}</td>
                             <td>{{ user.last_login }}</td>
+                            <td><span id="user-uuid">{{ user.uuid }}</span> <button onclick='navigator.clipboard.writeText(document.getElementById("user-uuid").innerText)'>copy</button></td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -151,6 +176,16 @@
             <div>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.bundle.js"></script>
                 <div class="container">
+                    <form action="{% url 'sales_dashboard:organisation_info' organisation.id %}" method="get" class="form-inline float-right">
+                        <label for="date-range">Days History: </label>
+                          <select name="date_range" id="date-range" class="custom-select m-1">
+                            <option value="30d" {% if date_range == "30d" %}selected{% endif %}>30d</option>
+                            <option value="90d" {% if date_range == "90d" %}selected{% endif %}>90d</option>
+                            <option value="180d" {% if date_range == "180d" %}selected{% endif %}>180d</option>
+                            <option value="365d" {% if date_range == "365d" %}selected{% endif %}>365d</option>
+                          </select>
+                          <button type="submit" class="btn btn-primary m-1">Apply</button>
+                        </form>
                     <canvas id="examChart"></canvas>
                 </div>
             </div>
@@ -182,6 +217,11 @@ var myChart = new Chart(ctx, {
         label: 'Traits',
         data: {{traits}},
         backgroundColor: '#EBCCD1',
+      },
+      {
+        label: 'Environment Documents',
+        data: {{environment_documents}},
+        backgroundColor: '#368BD1',
       }
     ]
   },

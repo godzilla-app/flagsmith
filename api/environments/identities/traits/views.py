@@ -1,8 +1,8 @@
 from django.conf import settings
 from django.core.exceptions import BadRequest
 from django.db.models import Q
-from drf_yasg2 import openapi
-from drf_yasg2.utils import swagger_auto_schema
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -21,8 +21,10 @@ from environments.identities.traits.serializers import (
     TraitSerializerBasic,
     TraitSerializerFull,
 )
-from environments.models import Environment
-from environments.permissions.constants import MANAGE_IDENTITIES
+from environments.permissions.constants import (
+    MANAGE_IDENTITIES,
+    VIEW_IDENTITIES,
+)
 from environments.permissions.permissions import (
     EnvironmentKeyPermissions,
     NestedEnvironmentPermissions,
@@ -39,15 +41,29 @@ from util.views import SDKAPIView
 class TraitViewSet(viewsets.ModelViewSet):
     serializer_class = TraitSerializer
 
+    def initial(self, request, *args, **kwargs):
+        # Add environment and identity to request(used by generate_identity_update_message decorator)
+        identity = Identity.objects.select_related("environment").get(
+            pk=self.kwargs["identity_pk"]
+        )
+        if not identity.environment.api_key == self.kwargs["environment_api_key"]:
+            raise Identity.DoesNotExist()
+
+        request.identity = identity
+        request.environment = identity.environment
+
+        self.identity = identity
+
+        super().initial(request, *args, **kwargs)
+
     def get_queryset(self):
         """
-        Override queryset to filter based on provided URL parameters.
+        Override queryset to filter based on the parent identity.
         """
-        environment_api_key = self.kwargs["environment_api_key"]
-        identity_pk = self.kwargs["identity_pk"]
-        environment = Environment.objects.get(api_key=environment_api_key)
-        identity = Identity.objects.get(pk=identity_pk, environment=environment)
-        return Trait.objects.filter(identity=identity)
+        if getattr(self, "swagger_fake_view", False):
+            return Trait.objects.none()
+
+        return Trait.objects.filter(identity=self.identity)
 
     def get_permissions(self):
         return [
@@ -58,24 +74,18 @@ class TraitViewSet(viewsets.ModelViewSet):
                     "update": MANAGE_IDENTITIES,
                     "partial_update": MANAGE_IDENTITIES,
                     "destroy": MANAGE_IDENTITIES,
-                    "list": MANAGE_IDENTITIES,
-                    "retrieve": MANAGE_IDENTITIES,
+                    "list": VIEW_IDENTITIES,
+                    "retrieve": VIEW_IDENTITIES,
                 },
                 get_environment_from_object_callable=lambda t: t.identity.environment,
             ),
         ]
 
-    def get_identity_from_request(self):
-        """
-        Get identity object from URL parameters in request.
-        """
-        return Identity.objects.get(pk=self.kwargs["identity_pk"])
-
     def perform_create(self, serializer):
-        serializer.save(identity=self.get_identity_from_request())
+        serializer.save(identity=self.identity)
 
     def perform_update(self, serializer):
-        serializer.save(identity=self.get_identity_from_request())
+        serializer.save(identity=self.identity)
 
     @swagger_auto_schema(
         manual_parameters=[
@@ -103,6 +113,7 @@ class SDKTraitsDeprecated(SDKAPIView):
     # API to handle /api/v1/identities/<identifier>/traits/<trait_key> endpoints
     # if Identity or Trait does not exist it will create one, otherwise will fetch existing
     serializer_class = TraitSerializerBasic
+    throttle_classes = []
 
     schema = None
 
@@ -171,6 +182,7 @@ class SDKTraitsDeprecated(SDKAPIView):
 class SDKTraits(mixins.CreateModelMixin, viewsets.GenericViewSet):
     permission_classes = (EnvironmentKeyPermissions, TraitPersistencePermissions)
     authentication_classes = (EnvironmentKeyAuthentication,)
+    throttle_classes = []
 
     def get_serializer_class(self):
         if self.action == "increment_value":
@@ -189,8 +201,16 @@ class SDKTraits(mixins.CreateModelMixin, viewsets.GenericViewSet):
     def create(self, request, *args, **kwargs):
         response = super(SDKTraits, self).create(request, *args, **kwargs)
         response.status_code = status.HTTP_200_OK
-        if settings.EDGE_API_URL:
-            forward_trait_request(request, request.environment.project.id)
+        if settings.EDGE_API_URL and request.environment.project.enable_dynamo_db:
+            forward_trait_request.delay(
+                args=(
+                    request.method,
+                    dict(request.headers),
+                    request.environment.project.id,
+                    request.data,
+                )
+            )
+
         return response
 
     @swagger_auto_schema(
@@ -203,11 +223,18 @@ class SDKTraits(mixins.CreateModelMixin, viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        if settings.EDGE_API_URL:
+        if settings.EDGE_API_URL and request.environment.project.enable_dynamo_db:
             # Convert the payload to the structure expected by /traits
             payload = serializer.data.copy()
             payload.update({"identity": {"identifier": payload.pop("identifier")}})
-            forward_trait_request(request, request.environment.project.id, payload)
+            forward_trait_request.delay(
+                args=(
+                    request.method,
+                    dict(request.headers),
+                    request.environment.project.id,
+                    payload,
+                )
+            )
 
         return Response(serializer.data, status=200)
 
@@ -240,8 +267,15 @@ class SDKTraits(mixins.CreateModelMixin, viewsets.GenericViewSet):
             serializer.is_valid(raise_exception=True)
             serializer.save()
 
-            if settings.EDGE_API_URL:
-                forward_trait_requests(request, request.environment.project.id)
+            if settings.EDGE_API_URL and request.environment.project.enable_dynamo_db:
+                forward_trait_requests.delay(
+                    args=(
+                        request.method,
+                        dict(request.headers),
+                        request.environment.project.id,
+                        request.data,
+                    )
+                )
 
             return Response(serializer.data, status=200)
 

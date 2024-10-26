@@ -1,0 +1,17 @@
+name: API Deploy to Production ECS
+
+on:
+  push:
+    tags:
+      - '*'
+    paths:
+      - api/**
+      - .github/**
+      - infrastructure/aws/production/**
+
+jobs:
+  deploy-ecs:
+    uses: ./.github/workflows/.reusable-deploy-ecs.yml
+    with:
+      environment: production
+    secrets: inherit

@@ -1,11 +1,17 @@
-import Utils from '../../utils/utils';
+import Constants from 'common/constants'
 
-module.exports = (envId, { FEATURE_NAME, FEATURE_FUNCTION, FEATURE_NAME_ALT }) => `import FlagsmithClient
+module.exports = (
+  envId,
+  { FEATURE_NAME, FEATURE_NAME_ALT },
+) => `import FlagsmithClient
 
 func application(_ application: UIApplication,
  didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
 
-  Flagsmith.shared.apiKey = "${envId}"
+  Flagsmith.shared.apiKey = "${envId}"${
+  Constants.isCustomFlagsmithUrl &&
+  `\n  Flagsmith.shared.baseURL = "${Project.flagsmithClientAPI}"\n`
+}
   // Check for a feature
   Flagsmith.shared
   .hasFeatureFlag(withID: "${FEATURE_NAME}", forIdentity: nil) { (result) in
@@ -22,4 +28,4 @@ func application(_ application: UIApplication,
           print(error)
       }
   }
-}`;
+}`

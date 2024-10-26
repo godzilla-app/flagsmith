@@ -1,5 +1,11 @@
-from django.apps import AppConfig
+from core.apps import BaseAppConfig
 
 
-class SegmentsConfig(AppConfig):
+class SegmentsConfig(BaseAppConfig):
     name = "segments"
+    default = True
+
+    def ready(self) -> None:
+        super().ready()
+
+        import segments.tasks  # noqa

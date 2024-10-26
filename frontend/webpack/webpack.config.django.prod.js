@@ -1,7 +1,6 @@
 // webpack.config.prod.js
 // Watches + deploys files minified + cachebusted
 
-const url = require('url');
 const path = require('path');
 const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
@@ -10,13 +9,12 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
 const moment = require('moment');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
-
-const Project = require('../common/project');
+const base = require('../webpack.config');
 
 module.exports = {
+    ...base,
     devtool: 'source-map',
     mode: 'production',
-
     entry: {
         main: './web/main.js',
     },
@@ -27,11 +25,6 @@ module.exports = {
                 extractComments: true,
             }),
         ],
-    },
-    externals: {
-        // require('jquery') is external and available
-        //  on the global var jQuery
-        'jquery': 'jQuery',
     },
     output: {
         path: path.join(__dirname, '../../api/static'),
@@ -51,21 +44,22 @@ module.exports = {
 
             // pull inline styles into cachebusted file
             new MiniCssExtractPlugin({
-                filename:  "[name].[fullhash].css",
-                chunkFilename:  "[id].[fullhash].css",
+                filename: '[name].[fullhash].css',
+                chunkFilename: '[id].[fullhash].css',
             }),
 
             // Copy static content
             new CopyWebpackPlugin(
                 {
-                    patterns:[
+                    patterns: [
                         { from: path.join(__dirname, '../web/static'), to: path.join(__dirname, '../../api/static') },
-                    ]
-                }),
+                    ],
+                },
+            ),
 
         ]).concat(require('./pages').map(page => new HtmlWebpackPlugin({
-            filename: `${page}.html`, // output template
-            template: `../api/app/templates/${page}.html`, // template to use
+            filename: `../app/templates/webpack/${page}.html`, // output template (relative from static dir)
+            template: `web/${page}.html`, // template to use (use the same template used for running FE outside of vercel)
             'assets': { // add these script/link tags
                 'client': '/[fullhash].js',
                 'style': 'style.[fullhash].css',
@@ -76,7 +70,7 @@ module.exports = {
         rules: require('./loaders').concat([
             {
                 test: /\.scss$/,
-                use: [MiniCssExtractPlugin.loader, 'css-loader','sass-loader'],
+                use: [MiniCssExtractPlugin.loader, 'css-loader', 'sass-loader'],
             },
         ]),
     },

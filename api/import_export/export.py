@@ -23,6 +23,7 @@ from features.multivariate.models import (
     MultivariateFeatureOption,
     MultivariateFeatureStateValue,
 )
+from features.versioning.models import EnvironmentFeatureVersion
 from integrations.datadog.models import DataDogConfiguration
 from integrations.heap.models import HeapConfiguration
 from integrations.mixpanel.models import MixpanelConfiguration
@@ -31,6 +32,12 @@ from integrations.rudderstack.models import RudderstackConfiguration
 from integrations.segment.models import SegmentConfiguration
 from integrations.slack.models import SlackConfiguration, SlackEnvironment
 from integrations.webhook.models import WebhookConfiguration
+from metadata.models import (
+    Metadata,
+    MetadataField,
+    MetadataModelField,
+    MetadataModelFieldRequirement,
+)
 from organisations.invites.models import InviteLink
 from organisations.models import (
     Organisation,
@@ -68,6 +75,7 @@ def full_export(organisation_id: int) -> typing.List[dict]:
         *export_environments(organisation_id),
         *export_identities(organisation_id),
         *export_features(organisation_id),
+        *export_metadata(organisation_id),
     ]
 
 
@@ -80,6 +88,22 @@ def export_organisation(organisation_id: int) -> typing.List[dict]:
         _EntityExportConfig(InviteLink, Q(organisation__id=organisation_id)),
         _EntityExportConfig(OrganisationWebhook, Q(organisation__id=organisation_id)),
         _EntityExportConfig(Subscription, Q(organisation__id=organisation_id)),
+    )
+
+
+def export_metadata(organisation_id: int) -> typing.List[dict]:
+    return _export_entities(
+        _EntityExportConfig(MetadataField, Q(organisation__id=organisation_id)),
+        _EntityExportConfig(
+            MetadataModelField, Q(field__organisation__id=organisation_id)
+        ),
+        _EntityExportConfig(
+            MetadataModelFieldRequirement,
+            Q(model_field__field__organisation__id=organisation_id),
+        ),
+        _EntityExportConfig(
+            Metadata, Q(model_field__field__organisation__id=organisation_id)
+        ),
     )
 
 
@@ -144,7 +168,7 @@ def export_identities(organisation_id: int) -> typing.List[dict]:
 
 def export_features(organisation_id: int) -> typing.List[dict]:
     """
-    Export all features and related entities (including ChangeRequests)
+    Export all features and related entities, except ChangeRequests.
     """
 
     feature_states = []
@@ -164,7 +188,12 @@ def export_features(organisation_id: int) -> typing.List[dict]:
             _EntityExportConfig(
                 Feature,
                 Q(project__organisation__id=organisation_id),
-                exclude_fields=["owners"],
+                exclude_fields=["owners", "group_owners"],
+            ),
+            _EntityExportConfig(
+                EnvironmentFeatureVersion,
+                Q(feature__project__organisation__id=organisation_id),
+                exclude_fields=["created_by", "published_by"],
             ),
             _EntityExportConfig(
                 MultivariateFeatureOption,

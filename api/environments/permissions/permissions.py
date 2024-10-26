@@ -2,11 +2,12 @@ import typing
 
 from django.db.models import Model, Q
 from rest_framework import exceptions
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from environments.models import Environment
 from environments.permissions.constants import VIEW_ENVIRONMENT
 from projects.models import Project
+from projects.permissions import CREATE_ENVIRONMENT
 
 
 class EnvironmentKeyPermissions(BasePermission):
@@ -24,16 +25,17 @@ class EnvironmentKeyPermissions(BasePermission):
         return True
 
 
-class EnvironmentPermissions(BasePermission):
+class EnvironmentPermissions(IsAuthenticated):
     def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+
         if view.action == "create":
             try:
                 project_id = request.data.get("project")
                 project_lookup = Q(id=project_id)
                 project = Project.objects.get(project_lookup)
-                return request.user.has_project_permission(
-                    "CREATE_ENVIRONMENT", project
-                )
+                return request.user.has_project_permission(CREATE_ENVIRONMENT, project)
             except Project.DoesNotExist:
                 return False
 
@@ -42,7 +44,9 @@ class EnvironmentPermissions(BasePermission):
 
     def has_object_permission(self, request, view, obj):
         if view.action == "clone":
-            return request.user.is_project_admin(obj.project)
+            return request.user.has_project_permission(CREATE_ENVIRONMENT, obj.project)
+        elif view.action == "get_document":
+            return request.user.has_environment_permission(VIEW_ENVIRONMENT, obj)
 
         return request.user.is_environment_admin(obj) or view.action in [
             "user_permissions"

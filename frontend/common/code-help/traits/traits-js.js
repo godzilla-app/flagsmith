@@ -1,5 +1,22 @@
-module.exports = (envId, { SEGMENT_NAME, FEATURE_FUNCTION, LIB_NAME, NPM_CLIENT, TRAIT_NAME, USER_ID, USER_FEATURE_FUNCTION, USER_FEATURE_NAME }, userId) => `${LIB_NAME}.identify("${userId || USER_ID}"); // This will create a user in the dashboard if they don't already exist
+import Constants from 'common/constants'
 
-// Set a user trait, setting traits will retrieve new flags and trigger an onChange event
-${LIB_NAME}.setTrait("${TRAIT_NAME}", 21);
-`;
+module.exports = (
+  envId,
+  { LIB_NAME, TRAIT_NAME, USER_ID },
+  userId,
+) => `// Option 1: initialise with an identity and traits
+${LIB_NAME}.init({
+    environmentID: "${envId}",${
+  Constants.isCustomFlagsmithUrl
+    ? `\n    api: "${Project.flagsmithClientAPI}",`
+    : ''
+}
+    identity: "${userId || USER_ID}",
+    traits: { "${TRAIT_NAME}": 21 },
+    onChange: (oldFlags, params) => { /* ... */ },
+});
+
+// Option 2: identify/set traits after initialising
+${LIB_NAME}.identify("${userId || USER_ID}", { "${TRAIT_NAME}": 21 });
+${LIB_NAME}.setTraits({ "${TRAIT_NAME}": 21 });
+`

@@ -1,5 +1,7 @@
-module.exports = (envId, { LIB_NAME, LIB_NAME_JAVA, FEATURE_NAME, FEATURE_NAME_ALT }, userId) => `// Identify/create user
+module.exports = (envId, { USER_ID }, userId) => `// Identify/create user
 
-curl 'https://edge.api.flagsmith.com/api/v1/identities/?identifier=${userId}'
+curl -i '${Project.flagsmithClientAPI}identities/?identifier=${
+  userId || USER_ID
+}' \\
      -H 'x-environment-key: ${envId}'
-`;
+`

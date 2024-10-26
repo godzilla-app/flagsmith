@@ -1,7 +1,6 @@
 // webpack.config.prod.js
 // Watches + deploys files minified + cachebusted
 
-const url = require('url');
 const path = require('path');
 const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
@@ -9,15 +8,14 @@ const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const CleanWebpackPlugin = require('clean-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
 const moment = require('moment');
-
-const Project = require('../common/project');
+const base = require('../webpack.config');
 
 const extraPlugins = [
     // Clear out build folder
     new CleanWebpackPlugin(['public'], { root: path.join(__dirname, '../') }),
     new MiniCssExtractPlugin({
-        filename:  "[name].[fullhash].css",
-        chunkFilename:  "[id].[fullhash].css",
+        filename: '[name].[fullhash].css',
+        chunkFilename: '[id].[fullhash].css',
     }),
     new webpack.DefinePlugin({
         __DEV__: false,
@@ -27,6 +25,7 @@ const extraPlugins = [
 
 
 module.exports = {
+    ...base,
     devtool: process.env.E2E ? false : 'source-map',
     mode: 'production',
     entry: {
@@ -38,22 +37,17 @@ module.exports = {
                 parallel: true,
                 extractComments: true,
             }),
-
         ],
-    },
-    externals: {
-        // require('jquery') is external and available
-        //  on the global var jQuery
-        'jquery': 'jQuery',
     },
     output: {
         path: path.join(__dirname, '../public/static'),
         filename: '[name].[fullhash].js',
-        publicPath: "/static/"
+        publicPath: '/static/',
     },
 
     plugins: require('./plugins')
         .concat(extraPlugins).concat(require('./pages').map((page) => {
+            // eslint-disable-next-line no-console
             console.log(page);
             return new HtmlWebpackPlugin({
                 filename: `${page}.handlebars`, // output
@@ -69,7 +63,7 @@ module.exports = {
         rules: require('./loaders').concat([
             {
                 test: /\.scss$/,
-                use: [MiniCssExtractPlugin.loader, 'css-loader','sass-loader'],
+                use: [MiniCssExtractPlugin.loader, 'css-loader', 'sass-loader'],
             },
         ]),
     },

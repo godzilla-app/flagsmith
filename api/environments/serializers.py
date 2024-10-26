@@ -2,25 +2,23 @@ import typing
 
 from rest_framework import serializers
 
-from audit.models import (
-    ENVIRONMENT_CREATED_MESSAGE,
-    ENVIRONMENT_UPDATED_MESSAGE,
-    AuditLog,
-    RelatedObjectType,
-)
 from environments.models import Environment, EnvironmentAPIKey, Webhook
 from features.serializers import FeatureStateSerializerFull
+from metadata.serializers import MetadataSerializer, SerializerWithMetadata
 from organisations.models import Subscription
 from organisations.subscriptions.serializers.mixins import (
     ReadOnlyIfNotValidPlanMixin,
 )
 from projects.models import Project
-from projects.serializers import ProjectSerializer
+from projects.serializers import ProjectListSerializer
+from util.drf_writable_nested.serializers import (
+    DeleteBeforeUpdateWritableNestedModelSerializer,
+)
 
 
 class EnvironmentSerializerFull(serializers.ModelSerializer):
     feature_states = FeatureStateSerializerFull(many=True)
-    project = ProjectSerializer()
+    project = ProjectListSerializer()
 
     class Meta:
         model = Environment
@@ -36,6 +34,8 @@ class EnvironmentSerializerFull(serializers.ModelSerializer):
 
 
 class EnvironmentSerializerLight(serializers.ModelSerializer):
+    use_mv_v2_evaluation = serializers.SerializerMethodField()
+
     class Meta:
         model = Environment
         fields = (
@@ -46,37 +46,61 @@ class EnvironmentSerializerLight(serializers.ModelSerializer):
             "project",
             "minimum_change_request_approvals",
             "allow_client_traits",
+            "banner_text",
+            "banner_colour",
+            "hide_disabled_flags",
+            "use_mv_v2_evaluation",
+            "use_identity_composite_key_for_hashing",
+            "hide_sensitive_data",
+            "use_v2_feature_versioning",
+            "use_identity_overrides_in_local_eval",
+        )
+        read_only_fields = ("use_v2_feature_versioning",)
+
+    def get_use_mv_v2_evaluation(self, instance: Environment) -> bool:
+        """
+        To avoid breaking the API, we return this field as well.
+
+        Warning: this will still mean that sending the `use_mv_v2_evaluation` field
+        (e.g. in a PUT request) will not behave as expected but, since this is a minor
+        issue, I think we can ignore.
+        """
+        return instance.use_identity_composite_key_for_hashing
+
+
+class EnvironmentSerializerWithMetadata(
+    SerializerWithMetadata,
+    DeleteBeforeUpdateWritableNestedModelSerializer,
+    EnvironmentSerializerLight,
+):
+    metadata = MetadataSerializer(required=False, many=True)
+
+    class Meta(EnvironmentSerializerLight.Meta):
+        fields = EnvironmentSerializerLight.Meta.fields + ("metadata",)
+
+    def get_project(self, validated_data: dict = None) -> Project:
+        if self.instance:
+            return self.instance.project
+        elif "project" in validated_data:
+            return validated_data["project"]
+
+        raise serializers.ValidationError(
+            "Unable to retrieve project for metadata validation."
         )
 
-    def create(self, validated_data):
-        instance = super(EnvironmentSerializerLight, self).create(validated_data)
-        self._create_audit_log(instance, True)
-        return instance
 
-    def update(self, instance, validated_data):
-        updated_instance = super(EnvironmentSerializerLight, self).update(
-            instance, validated_data
-        )
-        self._create_audit_log(instance, False)
-        return updated_instance
+class EnvironmentRetrieveSerializerWithMetadata(EnvironmentSerializerWithMetadata):
+    total_segment_overrides = serializers.IntegerField()
 
-    def _create_audit_log(self, instance, created):
-        message = (
-            ENVIRONMENT_CREATED_MESSAGE if created else ENVIRONMENT_UPDATED_MESSAGE
-        ) % instance.name
-        request = self.context.get("request")
-        AuditLog.objects.create(
-            author=getattr(request, "user", None),
-            related_object_id=instance.id,
-            related_object_type=RelatedObjectType.ENVIRONMENT.name,
-            environment=instance,
-            project=instance.project,
-            log=message,
+    class Meta(EnvironmentSerializerWithMetadata.Meta):
+        fields = EnvironmentSerializerWithMetadata.Meta.fields + (
+            "total_segment_overrides",
         )
+        read_only_fields = ("total_segment_overrides",)
 
 
 class CreateUpdateEnvironmentSerializer(
-    ReadOnlyIfNotValidPlanMixin, EnvironmentSerializerLight
+    ReadOnlyIfNotValidPlanMixin, EnvironmentSerializerWithMetadata
 ):
     invalid_plans = ("free",)
     field_names = ("minimum_change_request_approvals",)
@@ -112,7 +136,6 @@ class CloneEnvironmentSerializer(EnvironmentSerializerLight):
         name = validated_data.get("name")
         source_env = validated_data.get("source_env")
         clone = source_env.clone(name)
-        self._create_audit_log(clone, True)
         return clone
 
 
@@ -127,4 +150,4 @@ class EnvironmentAPIKeySerializer(serializers.ModelSerializer):
     class Meta:
         model = EnvironmentAPIKey
         fields = ("id", "key", "active", "created_at", "name", "expires_at")
-        read_only_fields = ("id", "created_at")
+        read_only_fields = ("id", "created_at", "key")

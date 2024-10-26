@@ -1,15 +1,18 @@
 import json
+from datetime import timedelta
 
+import re2 as re
 from app_analytics.influxdb_wrapper import (
     get_event_list_for_organisation,
     get_events_for_organisation,
-    get_top_organisations,
 )
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models import Count, F, Q, Value
+from django.db.models.functions import Greatest
 from django.http import (
+    HttpRequest,
     HttpResponse,
     HttpResponseBadRequest,
     HttpResponseRedirect,
@@ -17,6 +20,8 @@ from django.http import (
 from django.shortcuts import get_object_or_404
 from django.template import loader
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
+from django.utils.decorators import method_decorator
 from django.utils.safestring import mark_safe
 from django.views.generic import ListView
 from django.views.generic.edit import FormView
@@ -24,16 +29,36 @@ from django.views.generic.edit import FormView
 from environments.dynamodb.migrator import IdentityMigrator
 from environments.identities.models import Identity
 from import_export.export import full_export
-from organisations.chargebee import get_subscription_metadata
-from organisations.models import Organisation
-from projects.models import Project
+from organisations.chargebee.tasks import update_chargebee_cache
+from organisations.models import (
+    Organisation,
+    OrganisationSubscriptionInformationCache,
+)
+from organisations.tasks import (
+    update_organisation_subscription_information_cache,
+    update_organisation_subscription_information_influx_cache,
+)
 from users.models import FFAdminUser
 
-from .forms import EmailUsageForm, MaxAPICallsForm, MaxSeatsForm
+from .forms import (
+    EmailUsageForm,
+    EndTrialForm,
+    MaxAPICallsForm,
+    MaxSeatsForm,
+    StartTrialForm,
+)
 
 OBJECTS_PER_PAGE = 50
+DEFAULT_ORGANISATION_SORT = "subscription_information_cache__api_calls_30d"
+DEFAULT_ORGANISATION_SORT_DIRECTION = "DESC"
+
+email_regex = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
 
+@method_decorator(
+    name="get",
+    decorator=staff_member_required(),
+)
 class OrganisationList(ListView):
     model = Organisation
     paginate_by = OBJECTS_PER_PAGE
@@ -44,81 +69,80 @@ class OrganisationList(ListView):
             num_projects=Count("projects", distinct=True),
             num_users=Count("users", distinct=True),
             num_features=Count("projects__features", distinct=True),
-            num_segments=Count("projects__segments", distinct=True),
-        )
+            overage=Greatest(
+                Value(0),
+                F("subscription_information_cache__api_calls_30d")
+                - F("subscription_information_cache__allowed_30d_api_calls"),
+            ),
+        ).select_related("subscription", "subscription_information_cache")
 
-        if self.request.GET.get("search"):
-            search_term = self.request.GET["search"]
-            queryset = queryset.filter(
-                Q(name__icontains=search_term) | Q(users__email__icontains=search_term)
-            )
+        if search_term := self.request.GET.get("search"):
+            queryset = queryset.filter(self._build_search_query(search_term))
 
         if self.request.GET.get("filter_plan"):
             filter_plan = self.request.GET["filter_plan"]
-            if filter_plan == "free":
-                queryset = queryset.filter(subscription__isnull=True)
-            else:
-                queryset = queryset.filter(subscription__plan__icontains=filter_plan)
+            queryset = queryset.filter(subscription__plan__icontains=filter_plan)
 
-        # Annotate the queryset with the organisations usage for the given time periods
-        # and order the queryset with it. Note: this is done as late as possible to
-        # reduce the impact of the query.
-        if settings.INFLUXDB_TOKEN:
-            for date_range, limit in (("30d", ""), ("7d", ""), ("24h", "100")):
-                key = f"num_{date_range}_calls"
-                org_calls = get_top_organisations(date_range, limit)
-                if org_calls:
-                    whens = [When(id=k, then=Value(v)) for k, v in org_calls.items()]
-                    queryset = queryset.annotate(
-                        **{key: Case(*whens, default=0, output_field=IntegerField())}
-                    ).order_by(f"-{key}")
-
-        if self.request.GET.get("sort_field"):
-            sort_field = self.request.GET["sort_field"]
-            sort_direction = (
-                "-" if self.request.GET.get("sort_direction", "ASC") == "DESC" else ""
-            )
-            queryset = queryset.order_by(f"{sort_direction}{sort_field}")
+        sort_field = self.request.GET.get("sort_field") or DEFAULT_ORGANISATION_SORT
+        sort_direction = (
+            self.request.GET.get("sort_direction")
+            or DEFAULT_ORGANISATION_SORT_DIRECTION
+        )
+        queryset = (
+            queryset.order_by(sort_field)
+            if sort_direction == "ASC"
+            else queryset.order_by(F(sort_field).desc(nulls_last=True))
+        )
 
         return queryset
 
     def get_context_data(self, **kwargs):
         data = super().get_context_data(**kwargs)
 
-        if "search" in self.request.GET:
-            search_term = self.request.GET["search"]
-            projects = Project.objects.all().filter(name__icontains=search_term)[:20]
-            data["projects"] = projects
-
-            users = FFAdminUser.objects.all().filter(
-                Q(last_name__icontains=search_term) | Q(email__icontains=search_term)
-            )[:20]
-            data["users"] = users
-            data["search"] = search_term
-
+        data["search"] = self.request.GET.get("search", "")
         data["filter_plan"] = self.request.GET.get("filter_plan")
         data["sort_field"] = self.request.GET.get("sort_field")
         data["sort_direction"] = self.request.GET.get("sort_direction")
 
+        # Use the most recent "influx_updated_at" in
+        # OrganisationSubscriptionInformationCache object to determine
+        # when the caches were last updated.
+        try:
+            subscription_information_caches_influx_updated_at = (
+                OrganisationSubscriptionInformationCache.objects.order_by(
+                    F("influx_updated_at").desc(nulls_last=True)
+                )
+                .first()
+                .influx_updated_at.strftime("%H:%M:%S %d/%m/%Y")
+            )
+
+        except AttributeError:
+            subscription_information_caches_influx_updated_at = None
+
+        data["subscription_information_caches_influx_updated_at"] = (
+            subscription_information_caches_influx_updated_at
+        )
+
         return data
+
+    def _build_search_query(self, search_term: str) -> Q:
+        if email_regex.match(search_term.lower()):
+            # Assume that the search is for the email of a given user
+            user = FFAdminUser.objects.filter(email__iexact=search_term).first()
+            return Q(id__in=user.organisations.values_list("id", flat=True))
+
+        return Q(name__icontains=search_term) | Q(
+            subscription__subscription_id=search_term
+        )
 
 
 @staff_member_required
-def organisation_info(request, organisation_id):
+def organisation_info(request: HttpRequest, organisation_id: int) -> HttpResponse:
     organisation = get_object_or_404(
         Organisation.objects.select_related("subscription"), pk=organisation_id
     )
     template = loader.get_template("sales_dashboard/organisation.html")
-    subscription_metadata = None
-    if organisation.has_subscription():
-        subscription_metadata = get_subscription_metadata(
-            organisation.subscription.subscription_id
-        )
-    max_api_calls = getattr(subscription_metadata, "api_calls", 50000)
-    max_seats = getattr(subscription_metadata, "seats", 0)
-    max_projects = getattr(subscription_metadata, "projects", 1)
-
-    event_list, labels = get_event_list_for_organisation(organisation_id)
+    subscription_metadata = organisation.subscription.get_subscription_metadata()
 
     identity_count_dict = {}
     identity_migration_status_dict = {}
@@ -133,32 +157,44 @@ def organisation_info(request, organisation_id):
 
     context = {
         "organisation": organisation,
-        "max_api_calls": max_api_calls,
-        "max_seats": max_seats,
-        "max_projects": max_projects,
-        "event_list": event_list,
-        "traits": mark_safe(json.dumps(event_list["traits"])),
-        "identities": mark_safe(json.dumps(event_list["identities"])),
-        "flags": mark_safe(json.dumps(event_list["flags"])),
-        "labels": mark_safe(json.dumps(labels)),
-        "api_calls": {
-            # TODO: this could probably be reduced to a single influx request
-            #  rather than 3
-            range_: get_events_for_organisation(organisation_id, date_range=range_)
-            for range_ in ("24h", "7d", "30d")
-        },
+        "max_api_calls": subscription_metadata.api_calls,
+        "max_seats": subscription_metadata.seats,
+        "max_projects": subscription_metadata.projects,
+        "chargebee_email": subscription_metadata.chargebee_email,
         "identity_count_dict": identity_count_dict,
         "identity_migration_status_dict": identity_migration_status_dict,
     }
 
-    # If self hosted and running without an Influx DB data store, we dont want to/cant show usage
+    # If self-hosted and running without an Influx DB data store, we don't want to/cant show usage
     if settings.INFLUXDB_TOKEN:
-        event_list, labels = get_event_list_for_organisation(organisation_id)
+        date_range = request.GET.get("date_range", "180d")
+        context["date_range"] = date_range
+
+        assert date_range.endswith("d")
+        now = timezone.now()
+        date_start = now - timedelta(days=int(date_range[:-1]))
+        event_list, labels = get_event_list_for_organisation(
+            organisation_id, date_start
+        )
         context["event_list"] = event_list
         context["traits"] = mark_safe(json.dumps(event_list["traits"]))
         context["identities"] = mark_safe(json.dumps(event_list["identities"]))
         context["flags"] = mark_safe(json.dumps(event_list["flags"]))
+        context["environment_documents"] = mark_safe(
+            json.dumps(event_list["environment-document"])
+        )
         context["labels"] = mark_safe(json.dumps(labels))
+
+        date_starts = {}
+        date_starts["24h"] = now - timedelta(days=1)
+        date_starts["7d"] = now - timedelta(days=7)
+        date_starts["30d"] = now - timedelta(days=30)
+        context["api_calls"] = {
+            # TODO: this could probably be reduced to a single influx request
+            #  rather than 3
+            period: get_events_for_organisation(organisation_id, date_start=_date_start)
+            for period, _date_start in date_starts.items()
+        }
 
     return HttpResponse(template.render(context, request))
 
@@ -184,6 +220,38 @@ def update_max_api_calls(request, organisation_id):
 
 
 @staff_member_required
+def organisation_start_trial(
+    request: HttpRequest, organisation_id: int
+) -> HttpResponse:
+    start_trial_form = StartTrialForm(request.POST)
+    if start_trial_form.is_valid():
+        organisation = get_object_or_404(Organisation, pk=organisation_id)
+        start_trial_form.save(organisation)
+
+    return HttpResponseRedirect(
+        reverse(
+            "sales_dashboard:organisation_info",
+            kwargs={"organisation_id": organisation_id},
+        )
+    )
+
+
+@staff_member_required
+def organisation_end_trial(request: HttpRequest, organisation_id: int) -> HttpResponse:
+    end_trial_form = EndTrialForm(request.POST)
+    if end_trial_form.is_valid():
+        organisation = get_object_or_404(Organisation, pk=organisation_id)
+        end_trial_form.save(organisation)
+
+    return HttpResponseRedirect(
+        reverse(
+            "sales_dashboard:organisation_info",
+            kwargs={"organisation_id": organisation_id},
+        )
+    )
+
+
+@staff_member_required
 def migrate_identities_to_edge(request, project_id):
     if not settings.PROJECT_METADATA_TABLE_NAME_DYNAMO:
         return HttpResponseBadRequest("DynamoDB is not enabled")
@@ -198,6 +266,14 @@ def migrate_identities_to_edge(request, project_id):
     return HttpResponseRedirect(reverse("sales_dashboard:index"))
 
 
+@method_decorator(
+    name="get",
+    decorator=staff_member_required(),
+)
+@method_decorator(
+    name="post",
+    decorator=staff_member_required(),
+)
 class EmailUsage(FormView):
     form_class = EmailUsageForm
     template_name = "sales_dashboard/email-usage.html"
@@ -218,3 +294,21 @@ def download_org_data(request, organisation_id):
         "attachment; filename=org-%d.json" % organisation_id
     )
     return response
+
+
+@staff_member_required()
+def trigger_update_organisation_subscription_information_influx_cache(request):
+    update_organisation_subscription_information_influx_cache.delay()
+    return HttpResponseRedirect(reverse("sales_dashboard:index"))
+
+
+@staff_member_required()
+def trigger_update_organisation_subscription_information_cache(request):
+    update_organisation_subscription_information_cache.delay()
+    return HttpResponseRedirect(reverse("sales_dashboard:index"))
+
+
+@staff_member_required()
+def trigger_update_chargebee_caches(request):
+    update_chargebee_cache.delay()
+    return HttpResponseRedirect(reverse("sales_dashboard:index"))

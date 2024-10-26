@@ -4,11 +4,13 @@ import uuid
 import pytest
 from django.test import Client as DjangoClient
 from django.urls import reverse
+from pytest_django.fixtures import SettingsWrapper
+from rest_framework import status
 from rest_framework.test import APIClient
-from tests.integration.helpers import create_mv_option_with_api
 
 from app.utils import create_hash
 from organisations.models import Organisation
+from tests.integration.helpers import create_mv_option_with_api
 
 
 @pytest.fixture()
@@ -71,12 +73,24 @@ def environment_api_key():
 
 
 @pytest.fixture()
-def environment(admin_client, project, environment_api_key, settings) -> int:
+def environment_name() -> str:
+    return "Test Environment"
+
+
+@pytest.fixture()
+def environment(
+    admin_client: APIClient,
+    project: int,
+    environment_api_key: str,
+    environment_name: str,
+    settings: SettingsWrapper,
+) -> int:
     settings.EDGE_RELEASE_DATETIME = None
     environment_data = {
-        "name": "Test Environment",
+        "name": environment_name,
         "api_key": environment_api_key,
         "project": project,
+        "allow_client_traits": True,
     }
     url = reverse("api-v1:environments:environment-list")
 
@@ -86,7 +100,9 @@ def environment(admin_client, project, environment_api_key, settings) -> int:
 
 @pytest.fixture()
 def dynamo_enabled_environment(
-    admin_client, dynamo_enabled_project, environment_api_key
+    admin_client: APIClient,
+    dynamo_enabled_project: int,
+    environment_api_key: str,
 ) -> int:
     environment_data = {
         "name": "Test Environment",
@@ -115,9 +131,44 @@ def identity(admin_client, identity_identifier, environment, environment_api_key
 
 
 @pytest.fixture()
+def identity_with_traits_matching_segment(
+    admin_client: APIClient,
+    environment_api_key,
+    identity: int,
+    segment_condition_value: str,
+    segment_condition_property: str,
+) -> int:
+    trait_data = {
+        "trait_key": segment_condition_property,
+        "string_value": segment_condition_value,
+    }
+    url = reverse(
+        "api-v1:environments:identities-traits-list",
+        args=[environment_api_key, identity],
+    )
+    res = admin_client.post(
+        url, data=json.dumps(trait_data), content_type="application/json"
+    )
+    assert res.status_code == status.HTTP_201_CREATED
+    return identity
+
+
+@pytest.fixture()
 def sdk_client(environment_api_key):
     client = APIClient()
     client.credentials(HTTP_X_ENVIRONMENT_KEY=environment_api_key)
+    return client
+
+
+@pytest.fixture()
+def server_side_sdk_client(
+    admin_client: APIClient, environment: int, environment_api_key: str
+) -> APIClient:
+    url = reverse("api-v1:environments:api-keys-list", args={environment_api_key})
+    response = admin_client.post(url, data={"name": "Some key"})
+
+    client = APIClient()
+    client.credentials(HTTP_X_ENVIRONMENT_KEY=response.json()["key"])
     return client
 
 
@@ -128,13 +179,75 @@ def default_feature_value():
 
 @pytest.fixture()
 def feature_name():
-    return "test_feature"
+    return "feature_1"
+
+
+@pytest.fixture()
+def feature_2_name():
+    return "feature_2"
+
+
+@pytest.fixture()
+def mv_feature_name():
+    return "mv_feature"
 
 
 @pytest.fixture()
 def feature(admin_client, project, default_feature_value, feature_name):
     data = {
         "name": feature_name,
+        "initial_value": default_feature_value,
+        "project": project,
+    }
+    url = reverse("api-v1:projects:project-features-list", args=[project])
+
+    response = admin_client.post(url, data=data)
+    return response.json()["id"]
+
+
+@pytest.fixture()
+def mv_feature(admin_client, project, default_feature_value, mv_feature_name):
+    data = {
+        "name": mv_feature_name,
+        "initial_value": default_feature_value,
+        "project": project,
+        "type": "MULTIVARIATE",
+    }
+    url = reverse("api-v1:projects:project-features-list", args=[project])
+
+    response = admin_client.post(url, data=data)
+    return response.json()["id"]
+
+
+@pytest.fixture()
+def mv_feature_option_value():
+    return "foo"
+
+
+@pytest.fixture()
+def mv_feature_option(
+    project: int,
+    admin_client: "APIClient",
+    mv_feature: int,
+    mv_feature_option_value: str,
+) -> int:
+    data = {
+        "string_value": mv_feature_option_value,
+        "type": "unicode",
+        "default_percentage_allocation": 0,
+        "feature": mv_feature,
+    }
+    url = reverse("api-v1:projects:feature-mv-options-list", args=[project, mv_feature])
+    response = admin_client.post(
+        url, data=json.dumps(data), content_type="application/json"
+    )
+    return response.json()["id"]
+
+
+@pytest.fixture()
+def feature_2(admin_client, project, default_feature_value, feature_2_name):
+    data = {
+        "name": feature_2_name,
         "initial_value": default_feature_value,
         "project": project,
     }
@@ -157,12 +270,46 @@ def segment_name():
 
 
 @pytest.fixture()
-def segment(admin_client, project, segment_name):
+def segment_condition_property():
+    return "foo"
+
+
+@pytest.fixture()
+def segment_condition_value():
+    return "bar"
+
+
+@pytest.fixture()
+def segment(
+    admin_client,
+    project,
+    segment_name,
+    segment_condition_property,
+    segment_condition_value,
+):
     url = reverse("api-v1:projects:project-segments-list", args=[project])
     data = {
         "name": segment_name,
         "project": project,
-        "rules": [{"type": "ALL", "rules": [], "conditions": []}],
+        "rules": [
+            {
+                "type": "ALL",
+                "rules": [
+                    {
+                        "type": "ANY",
+                        "rules": [],
+                        "conditions": [
+                            {
+                                "property": segment_condition_property,
+                                "operator": "EQUAL",
+                                "value": segment_condition_value,
+                            }
+                        ],
+                    }
+                ],
+                "conditions": [],
+            }
+        ],
     }
 
     response = admin_client.post(
@@ -187,6 +334,28 @@ def feature_segment(admin_client, segment, feature, environment):
 
 
 @pytest.fixture()
+def segment_featurestate(
+    admin_client: APIClient,
+    segment: int,
+    feature: int,
+    environment: int,
+    feature_segment: int,
+) -> int:
+    data = {
+        "enabled": True,
+        "feature_state_value": {"type": "unicode", "string_value": "segment override"},
+        "feature": feature,
+        "environment": environment,
+        "feature_segment": feature_segment,
+    }
+    url = reverse("api-v1:features:featurestates-list")
+    response = admin_client.post(
+        url, data=json.dumps(data), content_type="application/json"
+    )
+    return response.json()["id"]
+
+
+@pytest.fixture()
 def identity_traits():
     return [
         {"trait_value": "trait_value_1", "trait_key": "trait_key_1"},
@@ -196,14 +365,26 @@ def identity_traits():
 
 
 @pytest.fixture()
-def identity_document(environment_api_key, feature, identity_traits):
+def identity_document(
+    environment_api_key,
+    feature_name,
+    feature,
+    identity_traits,
+    feature_2_name,
+    feature_2,
+    mv_feature_name,
+    mv_feature,
+):
+    _identifier = "User1-Test"  # use a mixture of cases and symbols to make sure we're testing all cases
+    _dashboard_alias = "dashboard-alias"
+
     _environment_feature_state_1_document = {
         "featurestate_uuid": "ad71c644-71df-4e83-9cb5-cd2cd0160200",
         "multivariate_feature_state_values": [],
         "feature_state_value": "feature_1_value",
         "django_id": 1,
         "feature": {
-            "name": "feature_1",
+            "name": feature_name,
             "type": "STANDARD",
             "id": feature,
         },
@@ -216,9 +397,9 @@ def identity_document(environment_api_key, feature, identity_traits):
         "django_id": 1,
         "feature_state_value": "2.3",
         "feature": {
-            "name": "feature_2",
+            "name": feature_2_name,
             "type": "STANDARD",
-            "id": 200,
+            "id": feature_2,
         },
         "enabled": True,
         "feature_segment": None,
@@ -245,22 +426,23 @@ def identity_document(environment_api_key, feature, identity_traits):
         "feature_state_value": None,
         "django_id": 1,
         "feature": {
-            "name": "multivariate_feature",
+            "name": mv_feature_name,
             "type": "MULTIVARIATE",
-            "id": 400,
+            "id": mv_feature,
         },
         "enabled": False,
         "feature_segment": None,
     }
     return {
-        "composite_key": f"{environment_api_key}_user_1_test",
+        "composite_key": f"{environment_api_key}_{_identifier}",
+        "dashboard_alias": _dashboard_alias,
         "identity_traits": identity_traits,
         "identity_features": [
             _environment_feature_state_1_document,
             _environment_feature_state_2_document,
             _mv_feature_state_document,
         ],
-        "identifier": "user_1_test",
+        "identifier": _identifier,
         "created_date": "2021-09-21T10:12:42.230257+00:00",
         "environment_api_key": environment_api_key,
         "identity_uuid": "59efa2a7-6a45-46d6-b953-a7073a90eacf",
@@ -269,13 +451,22 @@ def identity_document(environment_api_key, feature, identity_traits):
 
 
 @pytest.fixture()
-def identity_document_without_fs(identity_document):
-    identity_document["identity_features"].clear()
-    return identity_document
+def identity_document_without_fs(environment_api_key, identity_traits):
+    return {
+        "composite_key": f"{environment_api_key}_user_1_test",
+        "identity_traits": identity_traits,
+        "identity_features": [],
+        "identifier": "user_1_test",
+        "created_date": "2021-09-21T10:12:42.230257+00:00",
+        "environment_api_key": environment_api_key,
+        "identity_uuid": "59efa2a7-6a45-46d6-b953-a7073a90eacf",
+        "django_id": None,
+        "dashboard_alias": None,
+    }
 
 
 @pytest.fixture()
-def master_api_key(organisation, admin_client):
+def admin_master_api_key(organisation: int, admin_client: APIClient) -> dict:
     url = reverse(
         "api-v1:organisations:organisation-master-api-keys-list",
         args=[organisation],
@@ -287,16 +478,16 @@ def master_api_key(organisation, admin_client):
 
 
 @pytest.fixture()
-def master_api_key_prefix(master_api_key):
-    return master_api_key["prefix"]
+def admin_master_api_key_prefix(admin_master_api_key: dict) -> str:
+    return admin_master_api_key["prefix"]
 
 
 @pytest.fixture()
-def master_api_key_client(master_api_key):
+def admin_master_api_key_client(admin_master_api_key: dict) -> APIClient:
     # Can not use `api_client` fixture here because:
     # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
     api_client = APIClient()
-    api_client.credentials(HTTP_AUTHORIZATION="Api-Key " + master_api_key["key"])
+    api_client.credentials(HTTP_AUTHORIZATION="Api-Key " + admin_master_api_key["key"])
     return api_client
 
 

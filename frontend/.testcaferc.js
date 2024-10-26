@@ -1,11 +1,13 @@
 const isDev = process.env.E2E_DEV;
 module.exports = {
-    "browsers": "chrome:headless",
+    "browsers": "firefox:headless",
     "port1": 8080,
     "port2": 8081,
     "hostname": "localhost",
     quarantineMode: false,
     skipJsErrors: true,
+    selectorTimeout: 20000,
+    assertionTimeout: 20000,
     cache: true,
     "videoPath": "reports/screen-captures",
     "videoOptions": {

@@ -1,0 +1,7 @@
+# Ignore a bunch of files:
+*.html
+*.json
+*.handlebars
+*.css
+.bablerc
+**/CHANGELOG.md

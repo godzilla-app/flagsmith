@@ -1,35 +1,26 @@
-from django.db.models import Manager, Prefetch
+from django.db.models import Prefetch
+from softdelete.models import SoftDeleteManager
 
 from features.models import FeatureSegment, FeatureState
 from features.multivariate.models import MultivariateFeatureStateValue
 
 
-class EnvironmentManager(Manager):
-    def filter_for_document_builder(self, *args, **kwargs):
+class EnvironmentManager(SoftDeleteManager):
+    def filter_for_document_builder(
+        self,
+        *args,
+        extra_select_related: list[str] | None = None,
+        extra_prefetch_related: list[Prefetch | str] | None = None,
+        **kwargs,
+    ):
         return (
-            super(EnvironmentManager, self)
+            super()
             .select_related(
                 "project",
                 "project__organisation",
-                "mixpanel_config",
-                "segment_config",
-                "amplitude_config",
-                "heap_config",
-                "dynatrace_config",
+                *extra_select_related or (),
             )
             .prefetch_related(
-                Prefetch(
-                    "feature_states",
-                    queryset=FeatureState.objects.select_related(
-                        "feature", "feature_state_value"
-                    ),
-                ),
-                Prefetch(
-                    "feature_states__multivariate_feature_state_values",
-                    queryset=MultivariateFeatureStateValue.objects.select_related(
-                        "multivariate_feature_option"
-                    ),
-                ),
                 "project__segments",
                 "project__segments__rules",
                 "project__segments__rules__rules",
@@ -43,7 +34,7 @@ class EnvironmentManager(Manager):
                 Prefetch(
                     "project__segments__feature_segments__feature_states",
                     queryset=FeatureState.objects.select_related(
-                        "feature", "feature_state_value"
+                        "feature", "feature_state_value", "environment"
                     ),
                 ),
                 Prefetch(
@@ -52,16 +43,13 @@ class EnvironmentManager(Manager):
                         "multivariate_feature_option"
                     ),
                 ),
+                *extra_prefetch_related or (),
             )
             .filter(*args, **kwargs)
         )
 
-    def get_queryset(self, *args, **kwargs):
-        return (
-            super()
-            .get_queryset(*args, **kwargs)
-            .select_related("project", "project__organisation")
-        )
+    def get_queryset(self):
+        return super().get_queryset().select_related("project", "project__organisation")
 
     def get_by_natural_key(self, api_key):
         return self.get(api_key=api_key)

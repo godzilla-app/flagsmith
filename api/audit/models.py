@@ -1,58 +1,41 @@
-import enum
+import typing
+from functools import cached_property
+from importlib import import_module
 
 from django.db import models
+from django.db.models import Model, Q
+from django.utils import timezone
+from django_lifecycle import (
+    AFTER_CREATE,
+    BEFORE_CREATE,
+    LifecycleModel,
+    hook,
+    priority,
+)
 
 from api_keys.models import MasterAPIKey
+from audit.related_object_type import RelatedObjectType
 from projects.models import Project
 
-FEATURE_CREATED_MESSAGE = "New Flag / Remote Config created: %s"
-FEATURE_DELETED_MESSAGE = "Flag / Remote Config Deleted: %s"
-FEATURE_UPDATED_MESSAGE = "Flag / Remote Config updated: %s"
-SEGMENT_CREATED_MESSAGE = "New Segment created: %s"
-SEGMENT_UPDATED_MESSAGE = "Segment updated: %s"
-FEATURE_SEGMENT_UPDATED_MESSAGE = (
-    "Segment rules updated for flag: %s in environment: %s"
-)
-ENVIRONMENT_CREATED_MESSAGE = "New Environment created: %s"
-ENVIRONMENT_UPDATED_MESSAGE = "Environment updated: %s"
-FEATURE_STATE_UPDATED_MESSAGE = (
-    "Flag state / Remote Config value updated for feature: %s"
-)
-IDENTITY_FEATURE_STATE_UPDATED_MESSAGE = (
-    "Flag state / Remote config value updated for feature '%s' and identity '%s'"
-)
-SEGMENT_FEATURE_STATE_UPDATED_MESSAGE = (
-    "Flag state / Remote config value updated for feature '%s' and segment '%s'"
-)
-IDENTITY_FEATURE_STATE_DELETED_MESSAGE = (
-    "Flag state / Remote config value deleted for feature '%s' and identity '%s'"
-)
-SEGMENT_FEATURE_STATE_DELETED_MESSAGE = (
-    "Flag state / Remote config value deleted for feature '%s' and segment '%s'"
-)
-
-
-class RelatedObjectType(enum.Enum):
-    FEATURE = "Feature"
-    FEATURE_STATE = "Feature state"
-    SEGMENT = "Segment"
-    ENVIRONMENT = "Environment"
-
+if typing.TYPE_CHECKING:
+    from organisations.models import Organisation
 
 RELATED_OBJECT_TYPES = ((tag.name, tag.value) for tag in RelatedObjectType)
 
 
-class AuditLog(models.Model):
-    created_date = models.DateTimeField("DateCreated", auto_now_add=True)
+class AuditLog(LifecycleModel):
+    created_date = models.DateTimeField("DateCreated")
+
     project = models.ForeignKey(
-        Project, related_name="audit_logs", null=True, on_delete=models.SET_NULL
+        Project, related_name="audit_logs", null=True, on_delete=models.DO_NOTHING
     )
     environment = models.ForeignKey(
         "environments.Environment",
         related_name="audit_logs",
         null=True,
-        on_delete=models.SET_NULL,
+        on_delete=models.DO_NOTHING,
     )
+
     log = models.TextField()
     author = models.ForeignKey(
         "users.FFAdminUser",
@@ -70,40 +53,116 @@ class AuditLog(models.Model):
     )
     related_object_id = models.IntegerField(null=True)
     related_object_type = models.CharField(max_length=20, null=True)
+    related_object_uuid = models.CharField(max_length=36, null=True)
 
-    skip_signals = models.CharField(
+    skip_signals_and_hooks = models.CharField(
         null=True,
         blank=True,
-        help_text="comma separated list of signal functions to skip",
+        help_text="comma separated list of signal/hooks functions/methods to skip",
         max_length=500,
+        db_column="skip_signals",
     )
+    is_system_event = models.BooleanField(default=False)
+
+    history_record_id = models.IntegerField(blank=True, null=True)
+    history_record_class_path = models.CharField(max_length=200, blank=True, null=True)
 
     class Meta:
         verbose_name_plural = "Audit Logs"
         ordering = ("-created_date",)
 
-    def __str__(self):
-        return "Audit Log %s" % self.id
+    @property
+    def organisation(self) -> "Organisation | None":
+        # TODO properly implement organisation relation
+        # maybe the relation list should not be _that_ exhaustive...
+        for relation in (
+            "project",
+            "environment",
+            "author",
+            "master_api_key",
+            "history_record",
+        ):
+            if hasattr(related_instance := getattr(self, relation), "organisation"):
+                return related_instance.organisation
+        return None
 
-    @classmethod
-    def create_record(
-        cls,
-        obj,
-        obj_type,
-        log_message,
-        author,
-        project=None,
-        environment=None,
-        persist=True,
-    ):
-        record = cls(
-            related_object_id=obj.id,
-            related_object_type=obj_type.name,
-            log=log_message,
-            author=author,
-            project=project,
-            environment=environment,
+    @property
+    def environment_document_updated(self) -> bool:
+        if self.related_object_type == RelatedObjectType.CHANGE_REQUEST.name:
+            return False
+        skip_signals_and_hooks = (
+            self.skip_signals_and_hooks.split(",")
+            if self.skip_signals_and_hooks
+            else []
         )
-        if persist:
-            record.save()
-        return record
+        return "send_environments_to_dynamodb" not in skip_signals_and_hooks
+
+    @cached_property
+    def history_record(self) -> typing.Optional[Model]:
+        if not (self.history_record_class_path and self.history_record_id):
+            # There are still AuditLog records that will not have this detail
+            # for example, audit log records which are created when segment
+            # override priorities are changed.
+            return
+
+        klass = self.get_history_record_model_class(self.history_record_class_path)
+        return klass.objects.filter(history_id=self.history_record_id).first()
+
+    @property
+    def project_name(self) -> str:
+        return getattr(self.project, "name", "unknown")
+
+    @property
+    def environment_name(self) -> str:
+        return getattr(self.environment, "name", "unknown")
+
+    @property
+    def author_identifier(self) -> str:
+        return getattr(self.author, "email", "system")
+
+    @staticmethod
+    def get_history_record_model_class(
+        history_record_class_path: str,
+    ) -> typing.Type[Model]:
+        module_path, class_name = history_record_class_path.rsplit(".", maxsplit=1)
+        module = import_module(module_path)
+        return getattr(module, class_name)
+
+    @hook(BEFORE_CREATE)
+    def add_project(self):
+        if self.environment and self.project is None:
+            self.project = self.environment.project
+
+    @hook(BEFORE_CREATE)
+    def add_created_date(self) -> None:
+        if not self.created_date:
+            self.created_date = timezone.now()
+
+    @hook(
+        AFTER_CREATE,
+        priority=priority.HIGHEST_PRIORITY,
+        when="environment_document_updated",
+        is_now=True,
+    )
+    def process_environment_update(self) -> None:
+        if not self.project:
+            return
+
+        from environments.models import Environment
+        from environments.tasks import process_environment_update
+
+        environments_filter = Q()
+        if self.environment_id:
+            environments_filter = Q(id=self.environment_id)
+
+        environment_ids = self.project.environments.filter(
+            environments_filter
+        ).values_list("id", flat=True)
+
+        # Update environment individually to avoid deadlock
+        for environment_id in environment_ids:
+            Environment.objects.filter(id=environment_id).update(
+                updated_at=self.created_date
+            )
+
+        process_environment_update.delay(args=(self.id,))

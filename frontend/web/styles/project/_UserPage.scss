@@ -1,13 +1,18 @@
+@import "../variables";
+
 .flag-different {
   .rc-switch {
-    background-color: $bt-brand-secondary !important;
-    border-color: $bt-brand-secondary !important;
+    background-color: $success !important;
+    border-color: $success !important;
+    &::after{
+      background-color: white;
+    }
   }
   .feature-value {
     .feature-value-container {
       display: inline-block;
       .quot,.feature-value {
-        color: $bt-brand-secondary !important;
+        color: $success !important;
       }
     }
   }

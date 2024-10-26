@@ -17,6 +17,7 @@ from .models import (
     Subscription,
     UserOrganisation,
 )
+from .subscriptions.constants import CHARGEBEE
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class OrganisationSerializerFull(serializers.ModelSerializer):
             "persist_trait_data",
             "block_access_to_admin",
             "restrict_project_create_to_admin",
+            "force_2fa",
         )
         read_only_fields = (
             "id",
@@ -84,13 +86,20 @@ class InviteSerializerFull(serializers.ModelSerializer):
 
     class Meta:
         model = Invite
-        fields = ("id", "email", "role", "date_created", "invited_by")
+        fields = (
+            "id",
+            "email",
+            "role",
+            "date_created",
+            "invited_by",
+            "permission_groups",
+        )
 
 
 class InviteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Invite
-        fields = ("id", "email", "role", "date_created")
+        fields = ("id", "email", "role", "date_created", "permission_groups")
         read_only_fields = ("id", "date_created")
 
     def validate(self, attrs):
@@ -124,7 +133,11 @@ class MultiInvitesSerializer(serializers.Serializer):
                 "invited_by": user,
                 "organisation": organisation,
             }
-            created_invites.append(Invite.objects.create(**data))
+            permission_groups = data.pop("permission_groups", [])
+            created_invite = Invite.objects.create(**data)
+            created_invite.permission_groups.set(permission_groups)
+
+            created_invites.append(created_invite)
 
         # return the created_invites to serialize the data back to the front end
         return created_invites
@@ -199,13 +212,18 @@ class PortalUrlSerializer(serializers.Serializer):
 class OrganisationWebhookSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrganisationWebhook
-        fields = ("id", "url", "enabled", "secret")
+        fields = ("id", "url", "enabled", "secret", "created_at", "updated_at")
         read_only_fields = ("id",)
 
 
 class InfluxDataSerializer(serializers.Serializer):
     # todo this have to be changed after moving influxdb_wrapper to marshmallow
     events_list = serializers.ListSerializer(child=serializers.DictField())
+
+
+class InfluxDataQuerySerializer(serializers.Serializer):
+    project_id = serializers.IntegerField(required=False)
+    environment_id = serializers.IntegerField(required=False)
 
 
 class GetHostedPageForSubscriptionUpgradeSerializer(serializers.Serializer):
@@ -222,5 +240,15 @@ class GetHostedPageForSubscriptionUpgradeSerializer(serializers.Serializer):
 
 class SubscriptionDetailsSerializer(serializers.Serializer):
     max_seats = serializers.IntegerField(source="seats")
-    max_projects = serializers.IntegerField(source="projects")
     max_api_calls = serializers.IntegerField(source="api_calls")
+    max_projects = serializers.IntegerField(source="projects", allow_null=True)
+
+    payment_source = serializers.ChoiceField(choices=[None, CHARGEBEE], allow_null=True)
+
+    chargebee_email = serializers.EmailField()
+
+
+class OrganisationAPIUsageNotificationSerializer(serializers.Serializer):
+    organisation_id = serializers.IntegerField()
+    percent_usage = serializers.IntegerField()
+    notified_at = serializers.DateTimeField()

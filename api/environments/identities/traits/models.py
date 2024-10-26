@@ -15,6 +15,15 @@ class Trait(models.Model):
         (FLOAT, "Float"),
     )
 
+    # list of fields that should be updated when using bulk update (e.g. in Identity.update_traits())
+    BULK_UPDATE_FIELDS = [
+        "value_type",
+        "string_value",
+        "integer_value",
+        "float_value",
+        "boolean_value",
+    ]
+
     identity = models.ForeignKey(
         "identities.Identity", related_name="identity_traits", on_delete=models.CASCADE
     )
@@ -22,7 +31,7 @@ class Trait(models.Model):
     value_type = models.CharField(
         max_length=10, choices=TRAIT_VALUE_TYPES, default=STRING, null=True, blank=True
     )
-    boolean_value = models.NullBooleanField(null=True, blank=True)
+    boolean_value = models.BooleanField(null=True, blank=True)
     integer_value = models.IntegerField(null=True, blank=True)
     string_value = models.CharField(null=True, max_length=2000, blank=True)
     float_value = models.FloatField(null=True, blank=True)
@@ -47,6 +56,14 @@ class Trait(models.Model):
     @property
     def trait_value(self):
         return self.get_trait_value()
+
+    @property
+    def transient(self) -> bool:
+        return getattr(self, "_transient", False)
+
+    @transient.setter
+    def transient(self, transient: bool) -> None:
+        self._transient = transient
 
     def get_trait_value(self):
         try:
