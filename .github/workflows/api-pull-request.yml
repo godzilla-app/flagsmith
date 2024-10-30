@@ -19,7 +19,7 @@ defaults:
 
 jobs:
   test:
-    runs-on: General-Purpose-8c-Runner
+    runs-on: aws
     name: API Unit Tests
 
     services:
